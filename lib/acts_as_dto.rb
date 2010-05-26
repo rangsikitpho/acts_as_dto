@@ -5,7 +5,7 @@ module ActsAsDto
   
   module ClassMethods
     
-    VALID_DTO_OPTIONS = [:class_name, :method_name]
+    VALID_DTO_OPTIONS = [:class_name, :method_name, :xml_name]
     
     def acts_as_dto(*args)      
       options = args.extract_options!      
@@ -13,14 +13,20 @@ module ActsAsDto
 
       field_function_map = args.inject(Hash.new) { |m,arg| arg.is_a?(Array) ? m[arg[0]] = arg[1] : m[arg] = arg; m }
       
-      dto_class_name = options.has_key?(:class_name) ? options[:class_name] : self.to_s + "DataTransferObject"
-      dto_method_name = options.has_key?(:method_name) ? options[:method_name] : "dto"
+      dto_class_name = options.fetch(:class_name, self.to_s + "DataTransferObject")
+      dto_method_name = options.fetch(:method_name, "dto")
+      dto_xml_name = options.fetch(:xml_name, dto_class_name.underscore.gsub('/','_'))
+      
       Object.module_eval(<<-EVAL, __FILE__, __LINE__)     
         class #{dto_class_name}
           include ActsAsDto::Dto
           FIELD_MAP = { #{field_function_map.map{ |field,func| ":#{field} => :#{func}" }.join(",") } }
           attr_accessor *(FIELD_MAP.keys)
-
+          
+          def self.xml_name
+            "#{dto_xml_name}"
+          end
+          
           def initialize(obj)
             
             if obj.is_a? Hash
@@ -52,13 +58,12 @@ module ActsAsDto
       options[:indent] ||= 2
       xml = options[:builder] ||= Builder::XmlMarkup.new(:indent => options[:indent])
       xml.instruct! unless options[:skip_instruct]
-      xml.tag!(self.class.name.underscore.dasherize.gsub('/', '_')) do
+
+      xml.tag!(self.class.xml_name) do
         self.instance_variables.each do |varname|
           var = self.instance_variable_get(varname)
-          if var.is_a?(ActsAsDto::Dto)
-            xml << var.to_xml(:skip_instruct => true, :root => var.class.name.pluralize.underscore.dasherize.gsub('/', '_'), :skip_types => true)
-          elsif var.is_a?(Array)
-            xml << var.to_xml(:skip_instruct => true, :root => var.first.class.name.pluralize.underscore.dasherize.gsub('/', '_'), :skip_types => true) 
+          if var.is_a?(ActsAsDto::Dto) or var.is_a?(Array)
+            xml << var.to_xml(:skip_instruct => true, :root => varname[1..-1], :dasherize => false, :skip_types => true)
           else
             xml.tag!(varname[1..-1],var)
           end
